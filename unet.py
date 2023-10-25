@@ -19,7 +19,7 @@ import shapely.wkt
 import shapely.affinity
 from collections import defaultdict
 
-K.set_image_dim_ordering('th')
+K.set_image_data_format('channels_first')
 
 N_Cls = 10
 inDir = '.'
