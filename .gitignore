@@ -6,3 +6,7 @@ sixteen_band/
 data/
 mask/
 kaggle/
+bin/
+include/
+lib/
+share/
