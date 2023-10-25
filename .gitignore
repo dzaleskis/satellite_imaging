@@ -1,0 +1,5 @@
+*.csv
+train_geojson_v3/
+three_band/
+sixteen_band/
+.DS_Store
