@@ -371,6 +371,10 @@ def train_net():
     msk = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
 
     model = get_unet()
+
+    # for visualization
+    model.save("keras_model.h5")
+
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
     #model_checkpoint = ModelCheckpoint('unet_tmp.hdf5', monitor='loss', save_best_only=True)
@@ -441,10 +445,10 @@ def check_predict(model, id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + str(i))
 
 if __name__ == "__main__":
-    stick_images_together()
+    # stick_images_together()
 
-    make_validation_set()
+    # make_validation_set()
 
     model, score, trs = train_net()
 
-    check_predict(model, '6120_2_2')
+    # check_predict(model, '6120_2_2')
