@@ -23,7 +23,7 @@ INPUT_SIZE = 160
 EPSILON = 1e-12
 
 CLASS_LIST = [
-    "Buildings", "Misc.Manmade structures", "Road",
+    "Buildings", "Misc Manmade structures", "Road",
     "Track", "Trees", "Crops", "Waterway", "Standing water",
     "Vehicle Large", "Vehicle Small"
 ]
@@ -442,7 +442,7 @@ def check_predict(model, id='6120_2_3'):
         ax2 = plt.subplot(132)
         ax2.set_title("predict "+ CLASS_LIST[i] +" pixels")
         ax2.imshow(msk[i], cmap=plt.get_cmap('gray'))
-        plt.savefig(inDir + '/kaggle/figures/' + str(i))
+        plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
 
 if __name__ == "__main__":
     stick_images_together()
