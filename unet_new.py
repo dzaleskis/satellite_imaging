@@ -445,10 +445,10 @@ def check_predict(model, id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + str(i))
 
 if __name__ == "__main__":
-    # stick_images_together()
+    stick_images_together()
 
-    # make_validation_set()
+    make_validation_set()
 
     model, score, trs = train_net()
 
-    # check_predict(model, '6120_2_2')
+    check_predict(model, '6120_2_2')
