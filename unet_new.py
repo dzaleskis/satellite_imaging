@@ -348,8 +348,8 @@ def train_net():
         del(x_trn, y_trn)
         gc.collect()
 
-    score = evaluate_jacc(model, img, msk)
-    print('jacc '+ str(score))
+        score = evaluate_jacc(model, img, msk)
+        print('jacc '+ str(score))
 
     model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
