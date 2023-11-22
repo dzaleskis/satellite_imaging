@@ -322,7 +322,7 @@ def get_unet():
     outputs = Convolution2D(CLASSES, 1, padding="same", activation = "softmax")(u9)
 
     model = Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=legacy.Adam(learning_rate=0.0001), loss=jaccard_loss, metrics=[jaccard_coef_int])
+    model.compile(optimizer=legacy.Adam(learning_rate=0.001), loss=jaccard_loss, metrics=[jaccard_coef_int])
 
     return model
 
@@ -340,7 +340,7 @@ def train_net():
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
-    for i in range(1):
+    for i in range(5):
         x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
         # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
         model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
