@@ -7,19 +7,15 @@ import tifffile as tiff
 import os
 import random
 from keras import backend as keras_backend
-from sklearn.metrics import jaccard_score
 from keras.models import Model
-from keras.layers import Input, Convolution2D, MaxPooling2D, UpSampling2D, Dropout, concatenate
+from keras.layers import Input, Convolution2D, Convolution2DTranspose, MaxPooling2D, Dropout, concatenate
 from keras.optimizers import legacy
-from keras.callbacks import ModelCheckpoint
 import gc
-
-# todo - rework code to use tensorflow format instead of theano
-keras_backend.set_image_data_format('channels_first')
 
 CLASSES = 10
 CHANNELS = 8
 INPUT_SIZE = 160
+BATCH_SIZE = 64
 EPSILON = 1e-12
 
 CLASS_LIST = [
@@ -44,7 +40,7 @@ inDir = './'
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures', exist_ok=True)
 # os.makedirs(inDir + 'kaggle/msk', exist_ok=True)
-# os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
+os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
 # os.makedirs(inDir + 'kaggle/subm', exist_ok=True)
 
 # data op
@@ -120,6 +116,23 @@ def generate_mask_for_image_and_class(raster_size, imageId, class_type, grid_siz
     return mask
 
 # data op
+def mask_for_polygons(polygons, im_size):
+    img_mask = np.zeros(im_size, np.uint8)
+    if not polygons:
+        return img_mask
+    
+    int_coords = lambda x: np.array(x).round().astype(np.int32)
+    exteriors = [int_coords(poly.exterior.coords) for poly in polygons.geoms]
+    interiors = [int_coords(pi.coords) for poly in polygons.geoms
+                 for pi in poly.interiors]
+    cv2.fillPoly(img_mask, exteriors, 1)
+    cv2.fillPoly(img_mask, interiors, 0)
+
+    gc.collect()
+
+    return img_mask
+
+# data op
 def multispectral(image_id):
     filename = os.path.join(inDir, 'sixteen_band', '{}_M.tif'.format(image_id))
     img = tiff.imread(filename)
@@ -146,8 +159,8 @@ def stretch_n(bands, lower_percent=1, higher_percent=99):
 
 # neural op
 def jaccard_coef(y_true, y_pred):
-    intersection = keras_backend.sum(y_true * y_pred, axis=[0, -1, -2])
-    sum_ = keras_backend.sum(y_true + y_pred, axis=[0, -1, -2])
+    intersection = keras_backend.sum(y_true * y_pred, axis=[0,1,2])
+    sum_ = keras_backend.sum(y_true + y_pred, axis=[0,1,2])
     jac = (intersection + EPSILON) / (sum_ - intersection + EPSILON)
 
     return keras_backend.mean(jac)
@@ -155,11 +168,15 @@ def jaccard_coef(y_true, y_pred):
 # neural op
 def jaccard_coef_int(y_true, y_pred):
     y_pred_pos = keras_backend.round(keras_backend.clip(y_pred, 0, 1))
-    intersection = keras_backend.sum(y_true * y_pred_pos, axis=[0, -1, -2])
-    sum_ = keras_backend.sum(y_true + y_pred_pos, axis=[0, -1, -2])
+    intersection = keras_backend.sum(y_true * y_pred_pos, axis=[0,1,2])
+    sum_ = keras_backend.sum(y_true + y_pred_pos, axis=[0,1,2])
     jac = (intersection + EPSILON) / (sum_ - intersection + EPSILON)
 
     return keras_backend.mean(jac)
+
+# neural op
+def jaccard_loss(y_true, y_pred):
+    return -jaccard_coef(y_true, y_pred)
 
 # neural op
 def stick_images_together():
@@ -195,13 +212,13 @@ def stick_images_together():
     gc.collect()
 
 # data op
-def get_patches(img, msk, amt=2000):
+def get_patches(img, msk, amt):
     x_max, y_max = img.shape[0] - INPUT_SIZE, img.shape[1] - INPUT_SIZE
 
     inputs, outputs, matched_classes = [], [], []
     # tr = [0.4, 0.1, 0.1, 0.15, 0.3, 0.95, 0.1, 0.05, 0.001, 0.005]
 
-    for i in range(amt):
+    while len(inputs) < amt:
         # select a starting point
         x_start = random.randint(0, x_max)
         y_start = random.randint(0, y_max)
@@ -233,140 +250,85 @@ def get_patches(img, msk, amt=2000):
                 # prevent same patch getting triggered by different classes 
                 break
 
-    inputs = 2 * np.transpose(inputs, (0, 3, 1, 2)) - 1
-    outputs = np.transpose(outputs, (0, 3, 1, 2))
-    # inputs, outputs = 2 * np.transpose(inputs, (0, 3, 1, 2)) - 1, np.transpose(outputs, (0, 3, 1, 2))
-    print (inputs.shape, outputs.shape, np.amax(inputs), np.amin(inputs), np.amax(outputs), np.amin(outputs))
+    inputs = 2 * np.array(inputs) - 1
+    outputs = np.array(outputs)
+    print ('inputs', inputs.shape, np.amin(inputs), np.amax(inputs))
+    print ('outputs', outputs.shape, np.amin(outputs), np.amax(outputs))
 
     gc.collect()
 
     return inputs, outputs
 
 # neural op
-def make_validation_set():
-    print ("let's pick some samples for validation")
-    img = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
-    mask = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
-    x, y = get_patches(img, mask, amt=2000)
+def evaluate_jacc(model, img, msk):
+    print("evaluate predictions by calculating jaccard score")
+    # get some new patches to calculate the jaccard score on new data
+    x_val, y_val = get_patches(img, msk, BATCH_SIZE * 30)
+    y_pred = model.predict(x_val, batch_size=4)
 
-    np.save(inDir + '/kaggle/data/input_validation_%d' % CLASSES, x)
-    np.save(inDir + '/kaggle/data/output_validation_%d' % CLASSES, y)
+    print ("prediction shape: ", y_pred.shape, " expected shape: ", y_val.shape)
 
+    score = jaccard_coef_int(y_val, y_pred).numpy()
+
+    del(x_val, y_val, y_pred)
     gc.collect()
 
-# neural op
-def jaccard_loss(y_true, y_pred):
-    return -jaccard_coef(y_true, y_pred)
+    return score
+
+def double_conv_block(x, n_filters):
+    x = Convolution2D(n_filters, 3, padding = "same", activation = "relu", kernel_initializer = "he_normal")(x)
+    x = Convolution2D(n_filters, 3, padding = "same", activation = "relu", kernel_initializer = "he_normal")(x)
+
+    return x
+
+def downsample_block(x, n_filters):
+    # Conv2D twice with ReLU activation
+    f = double_conv_block(x, n_filters)
+    # downsample
+    p = MaxPooling2D(2)(f)
+    p = Dropout(0.2)(p)
+
+    return f, p
+
+def upsample_block(x, conv_features, n_filters):
+    # upsample
+    x = Convolution2DTranspose(n_filters, 3, 2, padding="same")(x)
+    x = concatenate([x, conv_features])
+    x = Dropout(0.2)(x)
+    # Conv2D twice with ReLU activation
+    x = double_conv_block(x, n_filters)
+
+    return x
 
 # neural op
 def get_unet():
-    inputs = Input((CHANNELS, INPUT_SIZE, INPUT_SIZE))
-    conv1 = Convolution2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(inputs)
-    conv1 = Convolution2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv1)
-    pool1 = MaxPooling2D(pool_size=(2, 2),data_format='channels_first')(conv1)
+    # inputs
+    inputs = Input((INPUT_SIZE, INPUT_SIZE, CHANNELS))
+
+    # encoder: contracting path - downsample
+    f1, p1 = downsample_block(inputs, 32)
+    f2, p2 = downsample_block(p1, 64)
+    f3, p3 = downsample_block(p2, 128)
+    f4, p4 = downsample_block(p3, 256)
+    # bottleneck - stop contracting
+    bottleneck = double_conv_block(p4, 512)
+    # decoder: expanding path - upsample
+    u6 = upsample_block(bottleneck, f4, 256)
+    u7 = upsample_block(u6, f3, 128)
+    u8 = upsample_block(u7, f2, 64)
+    u9 = upsample_block(u8, f1, 32)
     
-    conv2 = Convolution2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(pool1)
-    conv2 = Convolution2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv2)
-    pool2 = MaxPooling2D(pool_size=(2, 2),data_format='channels_first')(conv2)
-    
-    conv3 = Convolution2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(pool2)
-    conv3 = Convolution2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv3)
-    pool3 = MaxPooling2D(pool_size=(2, 2),data_format='channels_first')(conv3)
-    
-    conv4 = Convolution2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(pool3)
-    conv4 = Convolution2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv4)
-    drop4 = Dropout(0.5)(conv4)
-    pool4 = MaxPooling2D(pool_size=(2, 2),data_format='channels_first')(drop4)
+    # outputs
+    outputs = Convolution2D(CLASSES, 1, padding="same", activation = "softmax")(u9)
 
-    conv5 = Convolution2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(pool4)
-    conv5 = Convolution2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv5)
-    drop5 = Dropout(0.5)(conv5)
-
-    up6 = Convolution2D(256, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(UpSampling2D(size = (2,2),data_format='channels_first')(drop5))
-    merge6 = concatenate([drop4,up6], axis = 1)
-    conv6 = Convolution2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(merge6)
-    conv6 = Convolution2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv6)
-
-    up7 = Convolution2D(128, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(UpSampling2D(size = (2,2),data_format='channels_first')(conv6))
-    merge7 = concatenate([conv3,up7], axis = 1)
-    conv7 = Convolution2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(merge7)
-    conv7 = Convolution2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv7)
-
-    up8 = Convolution2D(64, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(UpSampling2D(size = (2,2),data_format='channels_first')(conv7))
-    merge8 = concatenate([conv2,up8], axis = 1)
-    conv8 = Convolution2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(merge8)
-    conv8 = Convolution2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv8)
-
-    up9 = Convolution2D(32, 2, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(UpSampling2D(size = (2,2),data_format='channels_first')(conv8))
-    merge9 = concatenate([conv1,up9], axis = 1)
-    conv9 = Convolution2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(merge9)
-    conv9 = Convolution2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv9)
-    conv9 = Convolution2D(32, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal',data_format='channels_first')(conv9)
-    
-    conv10 = Convolution2D(CLASSES, (1, 1),strides=1, activation = 'sigmoid',data_format='channels_first')(conv9)
-
-    model = Model(inputs=inputs, outputs=conv10)
-    model.compile(optimizer=legacy.Adam(learning_rate=0.0001), loss='binary_crossentropy', metrics=[jaccard_coef, jaccard_coef_int, 'accuracy'])
+    model = Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer=legacy.Adam(learning_rate=0.0001), loss=jaccard_loss, metrics=[jaccard_coef_int])
 
     return model
 
 # neural op
-def calc_jacc(model):
-    print("calculate jaccard score")
-    img = np.load(inDir + '/kaggle/data/input_validation_%d.npy' % CLASSES)
-    msk = np.load(inDir + '/kaggle/data/output_validation_%d.npy' % CLASSES)
-
-    prd = model.predict(img, batch_size=4)
-    print ("prediction shape: ", prd.shape, " expected shape: ", msk.shape)
-    avg, trs = [], []
-
-    for i in range(CLASSES):
-        t_msk = msk[:, i, :, :]
-        t_prd = prd[:, i, :, :]
-        t_msk = t_msk.reshape(msk.shape[0] * msk.shape[2], msk.shape[3])
-        t_prd = t_prd.reshape(msk.shape[0] * msk.shape[2], msk.shape[3])
-
-        m, b_tr = 0, 0
-        for j in range(CLASSES):
-            tr = j / CLASSES
-            pred_binary_mask = t_prd > tr
-
-            jk = jaccard_score(t_msk, pred_binary_mask, average='micro')
-
-            if jk > m:
-                m = jk
-                b_tr = tr
-        
-        avg.append(m)
-        trs.append(b_tr)
-
-    score = sum(avg) / CLASSES
-
-    gc.collect()
-
-    return score, trs
-
-# data op
-def mask_for_polygons(polygons, im_size):
-    img_mask = np.zeros(im_size, np.uint8)
-    if not polygons:
-        return img_mask
-    
-    int_coords = lambda x: np.array(x).round().astype(np.int32)
-    exteriors = [int_coords(poly.exterior.coords) for poly in polygons.geoms]
-    interiors = [int_coords(pi.coords) for poly in polygons.geoms
-                 for pi in poly.interiors]
-    cv2.fillPoly(img_mask, exteriors, 1)
-    cv2.fillPoly(img_mask, interiors, 0)
-
-    gc.collect()
-
-    return img_mask
-
-# neural op
 def train_net():
-    print ("start train net")
-    x_val, y_val = np.load(inDir + '/kaggle/data/input_validation_%d.npy' % CLASSES), np.load(inDir + '/kaggle/data/output_validation_%d.npy' % CLASSES)
+    print ("train net")
     img = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
     msk = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
 
@@ -377,53 +339,54 @@ def train_net():
 
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
-    #model_checkpoint = ModelCheckpoint('unet_tmp.hdf5', monitor='loss', save_best_only=True)
 
     for i in range(1):
-        x_trn, y_trn = get_patches(img, msk)
-        model.fit(x_trn, y_trn, batch_size=64, epochs=10, verbose=1, shuffle=True,
-                  callbacks=[], validation_data=(x_val, y_val))
+        x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
+        # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
+        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
         
         del(x_trn, y_trn)
         gc.collect()
 
-        score, trs = calc_jacc(model)
-        print('jacc '+ str(score))
+    score = evaluate_jacc(model, img, msk)
+    print('jacc '+ str(score))
 
-        # TODO: reenable in the future 
-        # model.save_weights(inDir +'/kaggle/working/unet_10_jk%.4f' % score)
+    model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
-    return model, score, trs
-
-def predict_id(id, model, trs):
-    img = multispectral(id)
+def predict_on_img(img, model):
+    print("making a prediction on given image")
     x = stretch_n(img)
 
-    cnv = np.zeros((960, 960, CHANNELS)).astype(np.float32)
-    prd = np.zeros((CLASSES, 960, 960)).astype(np.float32)
+    cnv = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CHANNELS)).astype(np.float32)
+    prd = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CLASSES)).astype(np.float32)
     cnv[:img.shape[0], :img.shape[1], :] = x
 
+    # this processes the input image in INPUT_SIZE*INPUT_SIZE patches
+    # since the neural network can only ingest them this way
     for i in range(0, 6):
         line = []
         for j in range(0, 6):
             line.append(cnv[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE])
 
-        x = 2 * np.transpose(line, (0, 3, 1, 2)) - 1
+        x = 2 * np.array(line) - 1
         tmp = model.predict(x, batch_size=4)
+
         for j in range(tmp.shape[0]):
-            prd[:, i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE] = tmp[j]
+            prd[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE, :] = tmp[j]
 
-    trs = [0.4, 0.1, 0.4, 0.3, 0.3, 0.5, 0.3, 0.6, 0.1, 0.1]
-    for i in range(CLASSES):
-        prd[i] = prd[i] > trs[i]
+    # we want class to be first dimension (makes drawing easier)
+    pred_by_class = prd.transpose(2, 0, 1)
 
-    return prd[:, :img.shape[0], :img.shape[1]]
+    # resize the predictions to match the image size
+    return pred_by_class[:, :img.shape[0], :img.shape[1]]
 
-def check_predict(model, id='6120_2_3'):
+def check_predict(id='6120_2_3'):
+    model = get_unet()
+    model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
     print("check_predict")
 
-    msk = predict_id(id, model, [0.4, 0.1, 0.4, 0.3, 0.3, 0.5, 0.3, 0.6, 0.1, 0.1])
     m = multispectral(id)
+    msk = predict_on_img(m, model)
     print(m.shape)
 
     # this creates RGB image from multispectral data
@@ -445,10 +408,8 @@ def check_predict(model, id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
 
 if __name__ == "__main__":
-    stick_images_together()
+    # stick_images_together()
 
-    make_validation_set()
+    train_net()
 
-    model, score, trs = train_net()
-
-    check_predict(model, '6120_2_2')
+    check_predict('6120_2_2')
