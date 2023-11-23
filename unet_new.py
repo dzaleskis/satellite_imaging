@@ -387,10 +387,35 @@ def train_net():
 
     model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
-def predict_on_img(img, model):
-    print("making a prediction on given image")
-    x = stretch_n(img)
+def rgb_for_img(img):
+    # this creates RGB image from multispectral data
+    rgb = np.zeros((img.shape[0], img.shape[1], 3))
+    rgb[:,:,0] = img[:,:,4] #red channel
+    rgb[:,:,1] = img[:,:,2] #green channel
+    rgb[:,:,2] = img[:,:,1] #blue channel
 
+    return rgb
+
+def true_mask_for_img(img, id):
+    # this creates true mask for image
+    # we want class to be first dimension (makes drawing easier)
+    true_msk = np.zeros((CLASSES, img.shape[0], img.shape[1]))
+    dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
+    gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
+
+    for z_org in range(ORIGINAL_CLASSES):
+        # remap original index
+        z = CLASS_INDEX_MAP[z_org]
+        if z == -1:
+            continue
+
+        true_msk[z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
+
+    return true_msk
+
+def prediction_mask_for_img(img, model):
+    # this creates prediction mask for image
+    x = stretch_n(img)
     cnv = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CHANNELS)).astype(np.float32)
     prd = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CLASSES)).astype(np.float32)
     cnv[:img.shape[0], :img.shape[1], :] = x
@@ -420,27 +445,11 @@ def check_predict(id='6120_2_3'):
     model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
     m = multispectral(id)
-    msk = predict_on_img(m, model)
-    print(m.shape)
+    print("image shape: ", m.shape)
 
-    # this creates RGB image from multispectral data
-    img = np.zeros((m.shape[0], m.shape[1], 3))
-    img[:,:,0] = m[:,:,4] #red channel
-    img[:,:,1] = m[:,:,2] #green channel
-    img[:,:,2] = m[:,:,1] #blue channel
-
-    # this creates true mask for image
-    true_msk = np.zeros((CLASSES, m.shape[0], m.shape[1]))
-    dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
-    gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
-
-    for z_org in range(ORIGINAL_CLASSES):
-        # remap original index
-        z = CLASS_INDEX_MAP[z_org]
-        if z == -1:
-            continue
-
-        true_msk[z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
+    rgb = rgb_for_img(m)
+    true_msk = true_mask_for_img(m, id)
+    msk = prediction_mask_for_img(m, model)
 
     for i in range(CLASSES):
         # create the plot
@@ -449,7 +458,7 @@ def check_predict(id='6120_2_3'):
         # plot the original image
         ax1 = plt.subplot(131)
         ax1.set_title('image ID: ' + id)
-        ax1.imshow(stretch_n(img))
+        ax1.imshow(stretch_n(rgb))
 
         # plot image of true mask
         ax2 = plt.subplot(132)
