@@ -12,18 +12,34 @@ from keras.layers import Input, Convolution2D, Convolution2DTranspose, MaxPoolin
 from keras.optimizers import legacy
 import gc
 
-CLASSES = 8
-CHANNELS = 8
-TRAINING_CYCLES = 3
-INPUT_SIZE = 160
-BATCH_SIZE = 64
-EPSILON = 1e-12
-
-CLASS_LIST = [
+# these are the classes defined in the data file
+ORIGINAL_CLASS_LIST = [
     "Buildings", "Misc Manmade structures", "Road",
     "Track", "Trees", "Crops", "Waterway", "Standing water",
+    "Vehicle Large", "Vehicle Small"
 ]
 
+# mapping from original class index to new index
+CLASS_INDEX_MAP = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 4,
+    5: 5,
+    6: 6,
+    7: 6,
+    8: -1,
+    9: -1
+}
+
+# these are the classes we will actually use
+CLASS_LIST = [
+    "Buildings", "Misc Manmade structures", "Road", "Track",
+    "Trees", "Crops", "Water"
+]
+
+# average of occurence for each class
 AVERAGE_CLASS_FREQUENCIES = {
     "Buildings": 0.03,
     "Misc Manmade structures": 0.009,
@@ -31,10 +47,16 @@ AVERAGE_CLASS_FREQUENCIES = {
     "Track": 0.03,
     "Trees": 0.1,
     "Crops": 0.25,
-    "Waterway": 0.005,
-    "Standing water": 0.001,
+    "Water": 0.006,
 }
 
+ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
+CLASSES = len(CLASS_LIST)
+CHANNELS = 8
+TRAINING_CYCLES = 3
+INPUT_SIZE = 160
+BATCH_SIZE = 64
+EPSILON = 1e-12
 
 inDir = './'
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
@@ -201,7 +223,12 @@ def stick_images_together():
             print (id, "input data shape: ", img.shape,  "data mapped to range: ", np.amin(img), np.amax(img))
             x[s * i:s * i + s, s * j:s * j + s, :] = img[:s, :s, :]
             
-            for z in range(CLASSES):
+            for z_org in range(ORIGINAL_CLASSES):
+                # remap original index
+                z = CLASS_INDEX_MAP[z_org]
+                if z == -1:
+                    continue
+
                 y[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
                     (img.shape[0], img.shape[1]), id, z + 1, gridSizes, dataFrame)[:s, :s]
 
@@ -341,7 +368,7 @@ def train_net():
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
-    for i in range(TRAINING_CYCLES):
+    for i in range(1):
         x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
         # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
         model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
@@ -409,7 +436,7 @@ def check_predict(id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
 
 if __name__ == "__main__":
-    # stick_images_together()
+    stick_images_together()
 
     train_net()
 
