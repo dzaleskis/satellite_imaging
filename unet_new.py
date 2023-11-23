@@ -462,12 +462,12 @@ def check_predict(id='6120_2_3'):
 
         # plot image of true mask
         ax2 = plt.subplot(132)
-        ax2.set_title("true "+ CLASS_LIST[i] +" pixels")
+        ax2.set_title(CLASS_LIST[i] +" actual")
         ax2.imshow(true_msk[i], cmap=plt.get_cmap('gray'))
 
         # plot image of predicted mask
         ax3 = plt.subplot(133)
-        ax3.set_title("predict "+ CLASS_LIST[i] +" pixels")
+        ax3.set_title(CLASS_LIST[i] +" predicted")
         ax3.imshow(msk[i], cmap=plt.get_cmap('gray'))
 
         # save the plot
