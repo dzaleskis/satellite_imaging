@@ -287,7 +287,7 @@ def downsample_block(x, n_filters):
     f = double_conv_block(x, n_filters)
     # downsample
     p = MaxPooling2D(2)(f)
-    p = Dropout(0.2)(p)
+    p = Dropout(0.3)(p)
 
     return f, p
 
@@ -295,7 +295,7 @@ def upsample_block(x, conv_features, n_filters):
     # upsample
     x = Convolution2DTranspose(n_filters, 3, 2, padding="same")(x)
     x = concatenate([x, conv_features])
-    x = Dropout(0.2)(x)
+    x = Dropout(0.3)(x)
     # Conv2D twice with ReLU activation
     x = double_conv_block(x, n_filters)
 
