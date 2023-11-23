@@ -205,6 +205,12 @@ def stick_images_together():
     print("stick images together")
     s = 835
 
+    # if necessary files already exist, skip this step
+    if os.path.isfile(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES) and os.path.isfile(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES):
+        print("data already prepared, skipping")
+        return
+
+
     x = np.zeros((5 * s, 5 * s, CHANNELS))
     y = np.zeros((5 * s, 5 * s, CLASSES))
 
