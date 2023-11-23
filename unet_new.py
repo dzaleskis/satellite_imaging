@@ -12,7 +12,7 @@ from keras.layers import Input, Convolution2D, Convolution2DTranspose, MaxPoolin
 from keras.optimizers import legacy
 import gc
 
-CLASSES = 10
+CLASSES = 8
 CHANNELS = 8
 INPUT_SIZE = 160
 BATCH_SIZE = 64
@@ -21,20 +21,19 @@ EPSILON = 1e-12
 CLASS_LIST = [
     "Buildings", "Misc Manmade structures", "Road",
     "Track", "Trees", "Crops", "Waterway", "Standing water",
-    "Vehicle Large", "Vehicle Small"
 ]
-AVERAGE_CLASS_FREQUENCIES = [
-    0.03,
-    0.009,
-    0.008,
-    0.03,
-    0.1,
-    0.25,
-    0.005,
-    0.001,
-    0.00003,
-    0.00001
-]
+
+AVERAGE_CLASS_FREQUENCIES = {
+    "Buildings": 0.03,
+    "Misc Manmade structures": 0.009,
+    "Road": 0.008,
+    "Track": 0.03,
+    "Trees": 0.1,
+    "Crops": 0.25,
+    "Waterway": 0.005,
+    "Standing water": 0.001,
+}
+
 
 inDir = './'
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
@@ -200,6 +199,7 @@ def stick_images_together():
             img = stretch_n(img)
             print (id, "input data shape: ", img.shape,  "data mapped to range: ", np.amin(img), np.amax(img))
             x[s * i:s * i + s, s * j:s * j + s, :] = img[:s, :s, :]
+            
             for z in range(CLASSES):
                 y[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
                     (img.shape[0], img.shape[1]), id, z + 1, gridSizes, dataFrame)[:s, :s]
@@ -233,7 +233,7 @@ def get_patches(img, msk, amt):
             # calculate ratio of pixels with this class in the patch
             ratio = class_pixels / (INPUT_SIZE ** 2)
             # if the ratio is good enough, use it for validation
-            if ratio >= AVERAGE_CLASS_FREQUENCIES[j]:
+            if ratio >= AVERAGE_CLASS_FREQUENCIES[CLASS_LIST[j]]:
                 # perform a horizontal flip with probability 0.5
                 if random.uniform(0, 1) > 0.5:
                     input_patch = input_patch[::-1]
@@ -340,7 +340,7 @@ def train_net():
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
-    for i in range(5):
+    for i in range(1):
         x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
         # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
         model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
@@ -408,7 +408,7 @@ def check_predict(id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
 
 if __name__ == "__main__":
-    # stick_images_together()
+    stick_images_together()
 
     train_net()
 
