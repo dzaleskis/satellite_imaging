@@ -236,7 +236,7 @@ def stick_images_together():
                     continue
 
                 y[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
-                    (img.shape[0], img.shape[1]), id, z + 1, gridSizes, dataFrame)[:s, :s]
+                    (img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:s, :s]
 
     print("mask data mapped to range: ", np.amin(y), np.amax(y))
 
@@ -415,30 +415,53 @@ def predict_on_img(img, model):
     return pred_by_class[:, :img.shape[0], :img.shape[1]]
 
 def check_predict(id='6120_2_3'):
+    print("check_predict")
     model = get_unet()
     model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
-    print("check_predict")
 
     m = multispectral(id)
     msk = predict_on_img(m, model)
     print(m.shape)
 
     # this creates RGB image from multispectral data
-    img = np.zeros((m.shape[0],m.shape[1],3))
+    img = np.zeros((m.shape[0], m.shape[1], 3))
     img[:,:,0] = m[:,:,4] #red channel
     img[:,:,1] = m[:,:,2] #green channel
     img[:,:,2] = m[:,:,1] #blue channel
 
+    # this creates true mask for image
+    true_msk = np.zeros((CLASSES, m.shape[0], m.shape[1]))
+    dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
+    gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
+
+    for z_org in range(ORIGINAL_CLASSES):
+        # remap original index
+        z = CLASS_INDEX_MAP[z_org]
+        if z == -1:
+            continue
+
+        true_msk[z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
+
     for i in range(CLASSES):
-        # plot the original image
+        # create the plot
         plt.figure(figsize=(20,20))
+
+        # plot the original image
         ax1 = plt.subplot(131)
         ax1.set_title('image ID: ' + id)
         ax1.imshow(stretch_n(img))
-        # plot image of predictions
+
+        # plot image of true mask
         ax2 = plt.subplot(132)
-        ax2.set_title("predict "+ CLASS_LIST[i] +" pixels")
-        ax2.imshow(msk[i], cmap=plt.get_cmap('gray'))
+        ax2.set_title("true "+ CLASS_LIST[i] +" pixels")
+        ax2.imshow(true_msk[i], cmap=plt.get_cmap('gray'))
+
+        # plot image of predicted mask
+        ax3 = plt.subplot(133)
+        ax3.set_title("predict "+ CLASS_LIST[i] +" pixels")
+        ax3.imshow(msk[i], cmap=plt.get_cmap('gray'))
+
+        # save the plot
         plt.savefig(inDir + '/kaggle/figures/' + id + '-' + CLASS_LIST[i])
 
 if __name__ == "__main__":
