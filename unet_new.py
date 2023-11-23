@@ -14,6 +14,7 @@ import gc
 
 CLASSES = 8
 CHANNELS = 8
+TRAINING_CYCLES = 3
 INPUT_SIZE = 160
 BATCH_SIZE = 64
 EPSILON = 1e-12
@@ -340,7 +341,7 @@ def train_net():
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
-    for i in range(1):
+    for i in range(TRAINING_CYCLES):
         x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
         # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
         model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
@@ -408,7 +409,7 @@ def check_predict(id='6120_2_3'):
         plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
 
 if __name__ == "__main__":
-    stick_images_together()
+    # stick_images_together()
 
     train_net()
 
