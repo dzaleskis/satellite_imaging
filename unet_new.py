@@ -439,7 +439,7 @@ def check_predict(id='6120_2_3'):
         ax2 = plt.subplot(132)
         ax2.set_title("predict "+ CLASS_LIST[i] +" pixels")
         ax2.imshow(msk[i], cmap=plt.get_cmap('gray'))
-        plt.savefig(inDir + '/kaggle/figures/' + CLASS_LIST[i])
+        plt.savefig(inDir + '/kaggle/figures/' + id + '-' + CLASS_LIST[i])
 
 if __name__ == "__main__":
     stick_images_together()
