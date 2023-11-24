@@ -9,7 +9,8 @@ import random
 from keras import backend as keras_backend
 from keras.models import Model
 from keras.layers import Input, Convolution2D, Convolution2DTranspose, MaxPooling2D, Dropout, concatenate
-from keras.optimizers import legacy
+from keras.optimizers import legacy, schedules
+from keras.callbacks import TensorBoard
 import gc
 
 # these are the classes defined in the data file
@@ -18,20 +19,6 @@ ORIGINAL_CLASS_LIST = [
     "Track", "Trees", "Crops", "Waterway", "Standing water",
     "Vehicle Large", "Vehicle Small"
 ]
-
-# mapping from original class index to new index
-CLASS_INDEX_MAP = {
-    0: 0,
-    1: 1,
-    2: 2,
-    3: 3,
-    4: 4,
-    5: 5,
-    6: 6,
-    7: 6,
-    8: -1,
-    9: -1
-}
 
 # these are the classes we will actually use
 CLASS_LIST = [
@@ -50,6 +37,21 @@ AVERAGE_CLASS_FREQUENCIES = {
     "Water": 0.006,
 }
 
+# mapping from original class index to new index
+# -1 is used to skip a class
+CLASS_INDEX_MAP = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 4,
+    5: 5,
+    6: 6,
+    7: 6,
+    8: -1,
+    9: -1
+}
+
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
@@ -63,7 +65,7 @@ os.makedirs(inDir + 'kaggle/data', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures', exist_ok=True)
 # os.makedirs(inDir + 'kaggle/msk', exist_ok=True)
 os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
-# os.makedirs(inDir + 'kaggle/subm', exist_ok=True)
+os.makedirs(inDir + 'kaggle/logs', exist_ok=True)
 
 # data op
 def _convert_coordinates_to_raster(coords, img_size, xymax):
@@ -162,7 +164,7 @@ def multispectral(image_id):
 
     return img
 
-def stretch_n(bands, lower_percent=1, higher_percent=99):
+def stretch_n(bands, lower_percent=2, higher_percent=98):
     out = np.zeros_like(bands).astype(np.float32)
     n = bands.shape[2]
 
@@ -267,7 +269,7 @@ def get_patches(img, msk, amt):
             # calculate ratio of pixels with this class in the patch
             ratio = class_pixels / (INPUT_SIZE ** 2)
             # if the ratio is good enough, use it for validation
-            if ratio >= AVERAGE_CLASS_FREQUENCIES[CLASS_LIST[j]]:
+            if ratio >= AVERAGE_CLASS_FREQUENCIES[CLASS_LIST[j]] / 3:
                 # perform a horizontal flip with probability 0.5
                 if random.uniform(0, 1) > 0.5:
                     input_patch = input_patch[::-1]
@@ -355,8 +357,19 @@ def get_unet():
     # outputs
     outputs = Convolution2D(CLASSES, 1, padding="same", activation = "softmax")(u9)
 
+    # model
     model = Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=legacy.Adam(learning_rate=0.001), loss=jaccard_loss, metrics=[jaccard_coef_int])
+
+    # create a learning rate scheduler
+    learning_rate_scheduler = schedules.ExponentialDecay(
+        initial_learning_rate=0.001,
+        decay_steps=150,
+        decay_rate=0.9,
+        staircase=False
+    )
+
+    # compile the model
+    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["accuracy", jaccard_coef_int])
 
     return model
 
@@ -374,10 +387,12 @@ def train_net():
     # TODO: reenable in the future 
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
-    for i in range(1):
+    for i in range(TRAINING_CYCLES):
         x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
-        # TODO: split patches in 2 parts: i.e. 80% for training, 20% for validation and pass them
-        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True)
+        # create tensorboard for monitoring
+        tensorboard = TensorBoard(log_dir=inDir+'kaggle/logs',update_freq='batch')
+        # fit the model to the data
+        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True, callbacks=[tensorboard])
         
         del(x_trn, y_trn)
         gc.collect()
