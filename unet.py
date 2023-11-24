@@ -22,8 +22,11 @@ ORIGINAL_CLASS_LIST = [
 
 # these are the classes we will actually use
 CLASS_LIST = [
-    "Buildings", "Misc Manmade structures", "Road", "Track",
-    "Trees", "Crops", "Water"
+    "Buildings", "Misc Manmade structures",
+    "Road", "Track",
+    "Trees", "Crops",
+    "Water",
+    "Background"
 ]
 
 # average of occurence for each class
@@ -39,7 +42,7 @@ AVERAGE_CLASS_FREQUENCIES = {
 
 # mapping from original class index to new index
 # -1 is used to skip a class
-CLASS_INDEX_MAP = {
+ORIGINAL_INDEX_MAP = {
     0: 0,
     1: 1,
     2: 2,
@@ -55,7 +58,7 @@ CLASS_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 3
+TRAINING_CYCLES = 5
 INPUT_SIZE = 160
 BATCH_SIZE = 64
 EPSILON = 1e-12
@@ -213,8 +216,8 @@ def stick_images_together():
         return
 
 
-    x = np.zeros((5 * s, 5 * s, CHANNELS))
-    y = np.zeros((5 * s, 5 * s, CLASSES))
+    input = np.zeros((5 * s, 5 * s, CHANNELS))
+    true_class_msk = np.zeros((5 * s, 5 * s, CLASSES-1))
 
     dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
     gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
@@ -229,21 +232,27 @@ def stick_images_together():
             img = multispectral(id)
             img = stretch_n(img)
             print (id, "input data shape: ", img.shape,  "data mapped to range: ", np.amin(img), np.amax(img))
-            x[s * i:s * i + s, s * j:s * j + s, :] = img[:s, :s, :]
+            input[s * i:s * i + s, s * j:s * j + s, :] = img[:s, :s, :]
             
             for z_org in range(ORIGINAL_CLASSES):
                 # remap original index
-                z = CLASS_INDEX_MAP[z_org]
+                z = ORIGINAL_INDEX_MAP[z_org]
                 if z == -1:
                     continue
 
-                y[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
+                true_class_msk[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
                     (img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:s, :s]
 
-    print("mask data mapped to range: ", np.amin(y), np.amax(y))
+    # handle background after everything else
+    exists_mask = np.sum(true_class_msk, axis=2)
+    background_mask = (exists_mask == 0).astype(np.float32)
+    background_mask = np.reshape(background_mask, (background_mask.shape[0], background_mask.shape[1], 1))
+    output = np.concatenate((true_class_msk, background_mask), axis=2)
 
-    np.save(inDir + '/kaggle/data/input_training_%d' % CLASSES, x)
-    np.save(inDir + '/kaggle/data/output_training_%d' % CLASSES, y)
+    print("mask data mapped to range: ", np.amin(true_class_msk), np.amax(true_class_msk))
+
+    np.save(inDir + '/kaggle/data/input_training_%d' % CLASSES, input)
+    np.save(inDir + '/kaggle/data/output_training_%d' % CLASSES, output)
 
     gc.collect()
 
@@ -263,7 +272,8 @@ def get_patches(img, msk, amt):
         input_patch = img[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
         output_patch = msk[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
 
-        for j in range(CLASSES):
+        # skip background here
+        for j in range(CLASSES - 1):
             # calculate how many pixels with this class are in the patch
             class_pixels = np.sum(output_patch[:, :, j])
             # calculate ratio of pixels with this class in the patch
@@ -414,19 +424,28 @@ def rgb_for_img(img):
 def true_mask_for_img(img, id):
     # this creates true mask for image
     # we want class to be first dimension (makes drawing easier)
-    true_msk = np.zeros((CLASSES, img.shape[0], img.shape[1]))
+    true_class_msk = np.zeros((img.shape[0], img.shape[1], CLASSES-1))
     dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
     gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
 
+    # handle normal classes
     for z_org in range(ORIGINAL_CLASSES):
         # remap original index
-        z = CLASS_INDEX_MAP[z_org]
+        z = ORIGINAL_INDEX_MAP[z_org]
         if z == -1:
             continue
 
-        true_msk[z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
+        true_class_msk[:, :, z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
 
-    return true_msk
+    exists_mask = np.sum(true_class_msk, axis=2)
+    background_mask = (exists_mask == 0).astype(np.float32)
+    background_mask = np.reshape(background_mask, (background_mask.shape[0], background_mask.shape[1], 1))
+    true_mask = np.concatenate((true_class_msk, background_mask), axis=2)
+
+    # we want class to be first dimension (makes drawing easier)
+    mask_by_class = true_mask.transpose(2, 0, 1)
+
+    return mask_by_class
 
 def prediction_mask_for_img(img, model):
     # this creates prediction mask for image
