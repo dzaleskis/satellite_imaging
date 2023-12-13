@@ -58,7 +58,8 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 1
+TRAINING_CYCLES = 3
+EPOCHS = 10
 INPUT_SIZE = 160
 BATCH_SIZE = 64
 EPSILON = 1e-12
@@ -206,50 +207,50 @@ def jaccard_loss(y_true, y_pred):
     return -jaccard_coef(y_true, y_pred)
 
 # neural op
-def stick_images_together():
-    print("stick images together")
-    s = 835
+def prepare_training_data():
+    print("preparing training data")
 
     # if necessary files already exist, skip this step
     if os.path.isfile(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES) and os.path.isfile(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES):
         print("data already prepared, skipping")
         return
 
-
-    input = np.zeros((5 * s, 5 * s, CHANNELS))
-    true_class_msk = np.zeros((5 * s, 5 * s, CLASSES-1))
-
     dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
     gridSizes = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
 
     ids = sorted(dataFrame.ImageId.unique())
-    print("image ids: ", ids)
+    image_count = len(ids)
+    print("image count", image_count, "ids:", ids)
 
-    for i in range(5):
-        for j in range(5):
-            id = ids[5 * i + j]
+    dim = 835
+    input = np.zeros((image_count, dim, dim, CHANNELS))
+    output = np.zeros((image_count, dim, dim, CLASSES-1))
 
-            img = multispectral(id)
-            img = stretch_n(img)
-            print (id, "input data shape: ", img.shape,  "data mapped to range: ", np.amin(img), np.amax(img))
-            input[s * i:s * i + s, s * j:s * j + s, :] = img[:s, :s, :]
+    for i in range(image_count):
+        id = ids[i]
+        img = multispectral(id)
+        img = stretch_n(img)
+
+        # handle input
+        input[i] = img[:dim, :dim, :]
+        
+        # handle output
+        for z_org in range(ORIGINAL_CLASSES):
+            # remap original index
+            z = ORIGINAL_INDEX_MAP[z_org]
+            if z == -1:
+                continue 
             
-            for z_org in range(ORIGINAL_CLASSES):
-                # remap original index
-                z = ORIGINAL_INDEX_MAP[z_org]
-                if z == -1:
-                    continue
-
-                true_class_msk[s * i:s * i + s, s * j:s * j + s, z] = generate_mask_for_image_and_class(
-                    (img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:s, :s]
+            output[i, :, :, z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:dim, :dim]
 
     # handle background after everything else
-    exists_mask = np.sum(true_class_msk, axis=2)
+    exists_mask = np.sum(output, axis=3)
     background_mask = (exists_mask == 0).astype(np.float32)
-    background_mask = np.reshape(background_mask, (background_mask.shape[0], background_mask.shape[1], 1))
-    output = np.concatenate((true_class_msk, background_mask), axis=2)
+    background_mask = np.reshape(background_mask, (background_mask.shape[0], background_mask.shape[1], background_mask.shape[2], 1))
+    output = np.concatenate((output, background_mask), axis=3)
 
-    print("mask data mapped to range: ", np.amin(true_class_msk), np.amax(true_class_msk))
+    print ("input shape", input.shape, "input data mapped to range: ", np.amin(input), np.amax(input))
+    print("output shape", output.shape, "output data mapped to range: ", np.amin(output), np.amax(output))
 
     np.save(inDir + '/kaggle/data/input_training_%d' % CLASSES, input)
     np.save(inDir + '/kaggle/data/output_training_%d' % CLASSES, output)
@@ -257,20 +258,23 @@ def stick_images_together():
     gc.collect()
 
 # data op
-def get_patches(img, msk, amt):
-    x_max, y_max = img.shape[0] - INPUT_SIZE, img.shape[1] - INPUT_SIZE
+def get_patches(inputs, outputs, amount):
+    input_patches, output_patches = [], []
 
-    inputs, outputs, matched_classes = [], [], []
-    # tr = [0.4, 0.1, 0.1, 0.15, 0.3, 0.95, 0.1, 0.05, 0.001, 0.005]
+    while len(input_patches) < amount:
+        # rotate images used for patch extraction
+        index = len(input_patches) % inputs.shape[0]
+        input = inputs[index]
+        output = outputs[index]
 
-    while len(inputs) < amt:
         # select a starting point
+        x_max, y_max = input.shape[0] - INPUT_SIZE, input.shape[1] - INPUT_SIZE
         x_start = random.randint(0, x_max)
         y_start = random.randint(0, y_max)
 
         # create patch of size (INPUT_SIZE x INPUT_SIZE)
-        input_patch = img[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
-        output_patch = msk[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
+        input_patch = input[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
+        output_patch = output[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
 
         # skip background here
         for j in range(CLASSES - 1):
@@ -289,21 +293,20 @@ def get_patches(img, msk, amt):
                     input_patch = input_patch[:, ::-1]
                     output_patch = output_patch[:, ::-1]
 
-                inputs.append(input_patch)
-                outputs.append(output_patch)
-                matched_classes.append(CLASS_LIST[j])
+                input_patches.append(input_patch)
+                output_patches.append(output_patch)
 
                 # prevent same patch getting triggered by different classes 
                 break
 
-    inputs = 2 * np.array(inputs) - 1
-    outputs = np.array(outputs)
-    print ('inputs', inputs.shape, np.amin(inputs), np.amax(inputs))
-    print ('outputs', outputs.shape, np.amin(outputs), np.amax(outputs))
+    input_patches = 2 * np.array(input_patches) - 1
+    output_patches = np.array(output_patches)
+    print ('input patches', input_patches.shape, np.amin(input_patches), np.amax(input_patches))
+    print ('output patches', output_patches.shape, np.amin(output_patches), np.amax(output_patches))
 
     gc.collect()
 
-    return inputs, outputs
+    return input_patches, output_patches
 
 # neural op
 def evaluate_jacc(model, img, msk):
@@ -382,7 +385,7 @@ def get_unet():
     learning_rate_scheduler = schedules.ExponentialDecay(
         initial_learning_rate=0.001,
         decay_steps=150,
-        decay_rate=0.9,
+        decay_rate=0.90,
         staircase=False
     )
 
@@ -394,8 +397,8 @@ def get_unet():
 # neural op
 def train_net():
     print ("train net")
-    img = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
-    msk = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
+    inputs = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
+    outputs = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
 
     model = get_unet()
 
@@ -406,16 +409,16 @@ def train_net():
     #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
 
     for i in range(TRAINING_CYCLES):
-        x_trn, y_trn = get_patches(img, msk, BATCH_SIZE * 30)
+        x_trn, y_trn = get_patches(inputs, outputs, BATCH_SIZE * 30)
         # create tensorboard for monitoring
         tensorboard = TensorBoard(log_dir=inDir+'kaggle/logs',update_freq='batch')
         # fit the model to the data
-        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=15, verbose=1, shuffle=True, callbacks=[tensorboard])
+        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=EPOCHS, verbose=1, shuffle=True, callbacks=[tensorboard])
         
         del(x_trn, y_trn)
         gc.collect()
 
-        evaluate_jacc(model, img, msk)
+        evaluate_jacc(model, inputs, outputs)
 
     model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
@@ -524,7 +527,7 @@ def check_all():
         check_predict(id)
 
 if __name__ == "__main__":
-    stick_images_together()
+    prepare_training_data()
 
     train_net()
 
