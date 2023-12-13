@@ -58,7 +58,7 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 5
+TRAINING_CYCLES = 3
 INPUT_SIZE = 160
 BATCH_SIZE = 64
 EPSILON = 1e-12
@@ -402,7 +402,7 @@ def train_net():
         # create tensorboard for monitoring
         tensorboard = TensorBoard(log_dir=inDir+'kaggle/logs',update_freq='batch')
         # fit the model to the data
-        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=10, verbose=1, shuffle=True, callbacks=[tensorboard])
+        model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=15, verbose=1, shuffle=True, callbacks=[tensorboard])
         
         del(x_trn, y_trn)
         gc.collect()
@@ -507,9 +507,20 @@ def check_predict(id='6120_2_3'):
         # save the plot
         plt.savefig(inDir + '/kaggle/figures/' + id + '-' + CLASS_LIST[i])
 
+def check_all():
+    dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
+
+    ids = sorted(dataFrame.ImageId.unique())
+    print("image ids: ", ids)
+
+    for id in ids:
+        check_predict(id)
+
 if __name__ == "__main__":
     stick_images_together()
 
     train_net()
 
     check_predict('6120_2_2')
+
+    # check_all()
