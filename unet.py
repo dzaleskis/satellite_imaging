@@ -58,7 +58,7 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 3
+TRAINING_CYCLES = 1
 INPUT_SIZE = 160
 BATCH_SIZE = 64
 EPSILON = 1e-12
@@ -314,12 +314,20 @@ def evaluate_jacc(model, img, msk):
 
     print ("prediction shape: ", y_pred.shape, " expected shape: ", y_val.shape)
 
-    score = jaccard_coef_int(y_val, y_pred).numpy()
+    scores = []
+
+    for i in range(CLASSES):
+        class_true = y_val[:, :, :, i]
+        class_pred = y_pred[:, :, :, i]
+        class_score = jaccard_coef_int(class_true, class_pred).numpy()
+        scores.append(class_score)
+        print('class score for', CLASS_LIST[i], class_score)
+
+    score = sum(scores) / CLASSES
+    print('average score for all classes', score)
 
     del(x_val, y_val, y_pred)
     gc.collect()
-
-    return score
 
 def double_conv_block(x, n_filters):
     x = Convolution2D(n_filters, 3, padding = "same", activation = "relu", kernel_initializer = "he_normal")(x)
@@ -407,8 +415,7 @@ def train_net():
         del(x_trn, y_trn)
         gc.collect()
 
-        score = evaluate_jacc(model, img, msk)
-        print('jacc '+ str(score))
+        evaluate_jacc(model, img, msk)
 
     model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
