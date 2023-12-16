@@ -52,11 +52,11 @@ CLASS_SAMPLE_RATE = {
 }
 
 CLASS_COLORS = {
-    "Buildings": [0x96, 0x90, 0x07, 0],
+    "Buildings": [0xA9, 0xA9, 0xA9, 0],
     "Misc Manmade structures": [0xA8, 0xD1, 0xD1, 0],
     "Road": [0x4B, 0x4B, 0x50, 0],
     "Track":[0x96, 0x4B, 0x00, 0],
-    "Trees": [0xAA, 0xDD, 0x2D, 0],
+    "Trees": [0xBB, 0xDD, 0x2D, 0],
     "Crops":[0xEB, 0xCC, 0x95, 0],
     "Water": [0x24, 0x88, 0xD5, 0],
     "Background": [0xFF, 0xFF, 0xFF, 0]
@@ -79,7 +79,7 @@ ORIGINAL_INDEX_MAP = {
 
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
-CHANNELS = 8
+CHANNELS = 17
 TRAINING_CYCLES = 5
 EPOCHS = 10
 INPUT_SIZE = 128
@@ -190,6 +190,36 @@ def multispectral(image_id):
 
     return img
 
+def infrared(image_id):
+    filename = os.path.join(inDir, 'sixteen_band', '{}_A.tif'.format(image_id))
+    img = tiff.imread(filename)
+    img = np.rollaxis(img, 0, 3)
+
+    return img
+
+def panchromatic(image_id):
+    filename = os.path.join(inDir, 'sixteen_band', '{}_P.tif'.format(image_id))
+    img = tiff.imread(filename)
+
+    return img
+
+def get_channels(image_id):
+    # get multispectral channels
+    m = multispectral(image_id)
+    # get infrared channels
+    i = infrared(image_id)
+    # resize infrared channels to match multispectral
+    i = cv2.resize(i, (m.shape[1], m.shape[0]))
+    # get panchromatic channels
+    p = panchromatic(image_id)
+    # resize panchromatic channels to match multispectral
+    p = cv2.resize(p, (m.shape[1], m.shape[0]))
+    p = np.reshape(p, (p.shape[0], p.shape[1], 1))
+    # merge all channels
+    img = np.concatenate((m, i, p), axis=2)
+
+    return img
+
 def stretch_n(bands, lower_percent=2, higher_percent=98):
     out = np.zeros_like(bands).astype(np.float32)
     n = bands.shape[2]
@@ -207,7 +237,6 @@ def stretch_n(bands, lower_percent=2, higher_percent=98):
 
     return out
 
-# neural op
 def jaccard_coef(y_true, y_pred):
     intersection = keras_backend.sum(y_true * y_pred, axis=[0,1,2])
     sum_ = keras_backend.sum(y_true + y_pred, axis=[0,1,2])
@@ -215,7 +244,6 @@ def jaccard_coef(y_true, y_pred):
 
     return keras_backend.mean(jac)
 
-# neural op
 def jaccard_coef_int(y_true, y_pred):
     y_pred_pos = keras_backend.round(keras_backend.clip(y_pred, 0, 1))
     intersection = keras_backend.sum(y_true * y_pred_pos, axis=[0,1,2])
@@ -224,9 +252,25 @@ def jaccard_coef_int(y_true, y_pred):
 
     return keras_backend.mean(jac)
 
-# neural op
 def jaccard_loss(y_true, y_pred):
     return -jaccard_coef(y_true, y_pred)
+
+def dice_coef(y_true, y_pred, smooth=100):
+    y_true_f = keras_backend.flatten(y_true)
+    y_pred_f = keras_backend.flatten(y_pred)
+    intersection = keras_backend.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (keras_backend.sum(y_true_f) + keras_backend.sum(y_pred_f) + smooth)
+
+def dice_coef_multilabel(y_true, y_pred):
+    total=0
+
+    for index in range(CLASSES):
+        total += dice_coef(y_true[:,:,:,index], y_pred[:,:,:,index])
+
+    return total / CLASSES
+
+def dice_loss(y_true, y_pred):
+    return -dice_coef_multilabel(y_true, y_pred)
 
 # neural op
 def prepare_training_data():
@@ -250,7 +294,7 @@ def prepare_training_data():
 
     for i in range(image_count):
         id = ids[i]
-        img = multispectral(id)
+        img = get_channels(id)
         img = stretch_n(img)
 
         # handle input
@@ -346,6 +390,8 @@ def evaluate_jacc(model, img, msk):
     print ("prediction shape: ", y_pred.shape, " expected shape: ", y_val.shape)
 
     scores = []
+    weights = []
+    total_count = x_val.shape[0] * x_val.shape[1] * x_val.shape[2]
 
     for i in range(CLASSES):
         class_true = y_val[:, :, :, i]
@@ -354,8 +400,17 @@ def evaluate_jacc(model, img, msk):
         scores.append(class_score)
         print('class score for', CLASS_LIST[i], class_score)
 
+        class_count = np.sum(class_true)
+        weights.append(class_count / total_count)
+
     score = sum(scores) / CLASSES
     print('average score for all classes', score)
+
+    weighted_score = 0
+    for i in range(CLASSES):
+        weighted_score += scores[i] * weights[i]
+    
+    print('weighted score for all classes', weighted_score)
 
     del(x_val, y_val, y_pred)
     gc.collect()
@@ -418,7 +473,7 @@ def get_unet():
     )
 
     # compile the model
-    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["accuracy", jaccard_coef_int])
+    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["categorical_accuracy", jaccard_coef_int, dice_coef_multilabel])
 
     return model
 
@@ -433,8 +488,7 @@ def train_net():
     # for visualization
     model.save("keras_model.h5")
 
-    # TODO: reenable in the future 
-    #model.load_weights('../input/trained-weight/unet_10_jk0.7565')
+    # model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
     for i in range(TRAINING_CYCLES):
         x_trn, y_trn = get_patches(inputs, outputs, BATCH_SIZE * 30)
@@ -531,15 +585,15 @@ def check_predict_simple(id):
     model = get_unet()
     model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
-    m = multispectral(id)
-    print("image shape: ", m.shape)
+    img = get_channels(id)
+    print("image shape: ", img.shape)
 
-    rgb = rgb_for_img(m)
-    true_msk = true_mask_for_img(m, id)
-    pred_msk = prediction_mask_for_img(m, model)
+    rgb = rgb_for_img(img)
+    true_msk = true_mask_for_img(img, id)
+    pred_msk = prediction_mask_for_img(img, model)
 
-    full_msk_true = full_mask(m, true_msk)
-    full_msk_pred = full_mask(m, pred_msk)
+    full_msk_true = full_mask(img, true_msk)
+    full_msk_pred = full_mask(img, pred_msk)
 
     # create the plot
     plt.figure(figsize=(20,20))
@@ -567,12 +621,12 @@ def check_predict_detailed(id):
     model = get_unet()
     model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
-    m = multispectral(id)
-    print("image shape: ", m.shape)
+    img = get_channels(id)
+    print("image shape: ", img.shape)
 
-    rgb = rgb_for_img(m)
-    true_msk = true_mask_for_img(m, id)
-    pred_msk = prediction_mask_for_img(m, model)
+    rgb = rgb_for_img(img)
+    true_msk = true_mask_for_img(img, id)
+    pred_msk = prediction_mask_for_img(img, model)
 
     for i in range(CLASSES):
         # create the plot
