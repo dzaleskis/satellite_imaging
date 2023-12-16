@@ -29,15 +29,26 @@ CLASS_LIST = [
     "Background"
 ]
 
-# average of occurence for each class
-AVERAGE_CLASS_FREQUENCIES = {
-    "Buildings": 0.03,
-    "Misc Manmade structures": 0.009,
-    "Road": 0.008,
-    "Track": 0.03,
+# boundary at which we say a class "exists" based on ratio
+CLASS_EXISTS_BOUNDARY = {
+    "Buildings": 0.01,
+    "Misc Manmade structures": 0.0001,
+    "Road": 0.0001,
+    "Track": 0.0001,
     "Trees": 0.1,
-    "Crops": 0.25,
-    "Water": 0.006,
+    "Crops": 0.1,
+    "Water": 0.001,
+}
+
+# how many samples to take for single patch with this class
+CLASS_SAMPLE_RATE = {
+    "Buildings": 2,
+    "Misc Manmade structures": 4,
+    "Road": 2,
+    "Track": 4,
+    "Trees": 1,
+    "Crops": 1,
+    "Water": 4,
 }
 
 CLASS_COLORS = {
@@ -269,12 +280,34 @@ def prepare_training_data():
 
     gc.collect()
 
+def get_patch_samples(input_patch, output_patch):
+    sample_rate = 1
+    total_pixels = INPUT_SIZE ** 2
+
+    for i in range(CLASSES - 1):
+        class_pixels = np.sum(output_patch[:, :, i])
+        ratio = class_pixels / total_pixels
+        class_name = CLASS_LIST[i]
+
+        if ratio >= CLASS_EXISTS_BOUNDARY[class_name]:
+            sample_rate = max(sample_rate, CLASS_SAMPLE_RATE[class_name])
+
+    # normal, flip x, flip y, flip xy
+    patch_variants = [
+        (input_patch, output_patch),
+        (input_patch[::-1], output_patch[::-1]),
+        (input_patch[:, ::-1], output_patch[:, ::-1]),
+        (input_patch[::-1, ::-1], output_patch[::-1, ::-1]),
+    ]
+
+    return random.sample(patch_variants, sample_rate)
+
 # data op
 def get_patches(inputs, outputs, amount):
     input_patches, output_patches = [], []
 
     while len(input_patches) < amount:
-        # rotate images used for patch extraction
+        # rotate over images used for patch extraction
         index = len(input_patches) % inputs.shape[0]
         input = inputs[index]
         output = outputs[index]
@@ -288,31 +321,15 @@ def get_patches(inputs, outputs, amount):
         input_patch = input[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
         output_patch = output[x_start:x_start + INPUT_SIZE, y_start:y_start + INPUT_SIZE]
 
-        # skip background here
-        for j in range(CLASSES - 1):
-            # calculate how many pixels with this class are in the patch
-            class_pixels = np.sum(output_patch[:, :, j])
-            # calculate ratio of pixels with this class in the patch
-            ratio = class_pixels / (INPUT_SIZE ** 2)
-            # if the ratio is good enough, use it for validation
-            if ratio >= AVERAGE_CLASS_FREQUENCIES[CLASS_LIST[j]] / 3:
-                # perform a horizontal flip with probability 0.5
-                if random.uniform(0, 1) > 0.5:
-                    input_patch = input_patch[::-1]
-                    output_patch = output_patch[::-1]
-                # perform a vertical flip with probability 0.5
-                if random.uniform(0, 1) > 0.5:
-                    input_patch = input_patch[:, ::-1]
-                    output_patch = output_patch[:, ::-1]
+        samples = get_patch_samples(input_patch, output_patch)
 
-                input_patches.append(input_patch)
-                output_patches.append(output_patch)
+        for (in_sample, out_sample) in samples:
+            input_patches.append(in_sample)
+            output_patches.append(out_sample)
 
-                # prevent same patch getting triggered by different classes 
-                break
 
-    input_patches = 2 * np.array(input_patches) - 1
-    output_patches = np.array(output_patches)
+    input_patches = 2 * np.array(input_patches[:amount]) - 1
+    output_patches = np.array(output_patches[:amount])
     print ('input patches', input_patches.shape, np.amin(input_patches), np.amax(input_patches))
     print ('output patches', output_patches.shape, np.amin(output_patches), np.amax(output_patches))
 
