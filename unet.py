@@ -77,7 +77,8 @@ EPSILON = 1e-12
 
 inDir = './'
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
-os.makedirs(inDir + 'kaggle/figures', exist_ok=True)
+os.makedirs(inDir + 'kaggle/figures/simple', exist_ok=True)
+os.makedirs(inDir + 'kaggle/figures/detailed', exist_ok=True)
 # os.makedirs(inDir + 'kaggle/msk', exist_ok=True)
 os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
 os.makedirs(inDir + 'kaggle/logs', exist_ok=True)
@@ -541,7 +542,7 @@ def check_predict_simple(id):
     ax4.imshow(full_msk_pred)
 
     # save the plot
-    plt.savefig(inDir + '/kaggle/figures/' + id + '-All')
+    plt.savefig(inDir + '/kaggle/figures/simple/' + id + '-All')
 
 def check_predict_detailed(id):
     print("check_predict (detailed)")
@@ -575,7 +576,7 @@ def check_predict_detailed(id):
         ax3.imshow(pred_msk[i], cmap=plt.get_cmap('gray'))
 
         # save the plot
-        plt.savefig(inDir + '/kaggle/figures/' + id + '-' + CLASS_LIST[i])
+        plt.savefig(inDir + '/kaggle/figures/detailed/' + id + '-' + CLASS_LIST[i])
 
 def check_single(id):
     check_predict_simple(id)
