@@ -40,6 +40,17 @@ AVERAGE_CLASS_FREQUENCIES = {
     "Water": 0.006,
 }
 
+CLASS_COLORS = {
+    "Buildings": [0x96, 0x90, 0x07, 0],
+    "Misc Manmade structures": [0xA8, 0xD1, 0xD1, 0],
+    "Road": [0x4B, 0x4B, 0x50, 0],
+    "Track":[0x96, 0x4B, 0x00, 0],
+    "Trees": [0xAA, 0xDD, 0x2D, 0],
+    "Crops":[0xEB, 0xCC, 0x95, 0],
+    "Water": [0x24, 0x88, 0xD5, 0],
+    "Background": [0xFF, 0xFF, 0xFF, 0]
+}
+
 # mapping from original class index to new index
 # -1 is used to skip a class
 ORIGINAL_INDEX_MAP = {
@@ -460,31 +471,44 @@ def true_mask_for_img(img, id):
 def prediction_mask_for_img(img, model):
     # this creates prediction mask for image
     x = stretch_n(img)
-    cnv = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CHANNELS)).astype(np.float32)
-    prd = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CLASSES)).astype(np.float32)
-    cnv[:img.shape[0], :img.shape[1], :] = x
+    input = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CHANNELS)).astype(np.float32)
+    output = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CLASSES)).astype(np.float32)
+    input[:img.shape[0], :img.shape[1], :] = x
 
     # this processes the input image in INPUT_SIZE*INPUT_SIZE patches
     # since the neural network can only ingest them this way
     for i in range(0, 6):
         line = []
         for j in range(0, 6):
-            line.append(cnv[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE])
+            line.append(input[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE])
 
         x = 2 * np.array(line) - 1
         tmp = model.predict(x, batch_size=4)
 
         for j in range(tmp.shape[0]):
-            prd[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE, :] = tmp[j]
+            output[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE, :] = tmp[j]
 
     # we want class to be first dimension (makes drawing easier)
-    pred_by_class = prd.transpose(2, 0, 1)
+    pred_by_class = output.transpose(2, 0, 1)
 
     # resize the predictions to match the image size
     return pred_by_class[:, :img.shape[0], :img.shape[1]]
 
-def check_predict(id='6120_2_3'):
-    print("check_predict")
+def full_mask(img, mask):
+    mask = mask.transpose(1, 2, 0)
+    result = np.zeros((img.shape[0], img.shape[1], 4)).astype(np.uint8)
+
+    for x in range(mask.shape[0]):
+        for y in range(mask.shape[1]):
+            distr = mask[x][y]
+            argmax = np.argmax(distr)
+            result[x][y] = CLASS_COLORS[CLASS_LIST[argmax]]
+            result[x][y][3] = 255 * distr[argmax]
+    
+    return result
+
+def check_predict_simple(id):
+    print("check_predict (simple)")
     model = get_unet()
     model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
@@ -493,7 +517,43 @@ def check_predict(id='6120_2_3'):
 
     rgb = rgb_for_img(m)
     true_msk = true_mask_for_img(m, id)
-    msk = prediction_mask_for_img(m, model)
+    pred_msk = prediction_mask_for_img(m, model)
+
+    full_msk_true = full_mask(m, true_msk)
+    full_msk_pred = full_mask(m, pred_msk)
+
+    # create the plot
+    plt.figure(figsize=(20,20))
+
+    # plot the original image
+    ax1 = plt.subplot(131)
+    ax1.set_title('image ID: ' + id)
+    ax1.imshow(stretch_n(rgb))
+
+    # plot image of full mask
+    ax4 = plt.subplot(132)
+    ax4.set_title("all actual")
+    ax4.imshow(full_msk_true)
+
+    # plot image of full mask
+    ax4 = plt.subplot(133)
+    ax4.set_title("all predicted")
+    ax4.imshow(full_msk_pred)
+
+    # save the plot
+    plt.savefig(inDir + '/kaggle/figures/' + id + '-All')
+
+def check_predict_detailed(id):
+    print("check_predict (detailed)")
+    model = get_unet()
+    model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
+
+    m = multispectral(id)
+    print("image shape: ", m.shape)
+
+    rgb = rgb_for_img(m)
+    true_msk = true_mask_for_img(m, id)
+    pred_msk = prediction_mask_for_img(m, model)
 
     for i in range(CLASSES):
         # create the plot
@@ -512,10 +572,14 @@ def check_predict(id='6120_2_3'):
         # plot image of predicted mask
         ax3 = plt.subplot(133)
         ax3.set_title(CLASS_LIST[i] +" predicted")
-        ax3.imshow(msk[i], cmap=plt.get_cmap('gray'))
+        ax3.imshow(pred_msk[i], cmap=plt.get_cmap('gray'))
 
         # save the plot
         plt.savefig(inDir + '/kaggle/figures/' + id + '-' + CLASS_LIST[i])
+
+def check_single(id):
+    check_predict_simple(id)
+    check_predict_detailed(id)    
 
 def check_all():
     dataFrame = pd.read_csv(inDir + '/train_wkt_v4.csv')
@@ -524,13 +588,13 @@ def check_all():
     print("image ids: ", ids)
 
     for id in ids:
-        check_predict(id)
+        check_predict_simple(id)
 
 if __name__ == "__main__":
     prepare_training_data()
 
     train_net()
 
-    check_predict('6120_2_2')
+    check_single('6120_2_2')
 
     # check_all()
