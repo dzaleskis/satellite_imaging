@@ -69,9 +69,9 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 3
+TRAINING_CYCLES = 1
 EPOCHS = 10
-INPUT_SIZE = 160
+INPUT_SIZE = 128
 BATCH_SIZE = 64
 EPSILON = 1e-12
 
@@ -472,15 +472,17 @@ def true_mask_for_img(img, id):
 def prediction_mask_for_img(img, model):
     # this creates prediction mask for image
     x = stretch_n(img)
-    input = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CHANNELS)).astype(np.float32)
-    output = np.zeros((INPUT_SIZE * 6, INPUT_SIZE * 6, CLASSES)).astype(np.float32)
+    x_scale = round(img.shape[0] / INPUT_SIZE)
+    y_scale = round(img.shape[1] / INPUT_SIZE)
+    input = np.zeros((INPUT_SIZE * x_scale, INPUT_SIZE * y_scale, CHANNELS)).astype(np.float32)
+    output = np.zeros((INPUT_SIZE * x_scale, INPUT_SIZE * y_scale, CLASSES)).astype(np.float32)
     input[:img.shape[0], :img.shape[1], :] = x
 
     # this processes the input image in INPUT_SIZE*INPUT_SIZE patches
     # since the neural network can only ingest them this way
-    for i in range(0, 6):
+    for i in range(0, x_scale):
         line = []
-        for j in range(0, 6):
+        for j in range(0, y_scale):
             line.append(input[i * INPUT_SIZE:(i + 1) * INPUT_SIZE, j * INPUT_SIZE:(j + 1) * INPUT_SIZE])
 
         x = 2 * np.array(line) - 1
