@@ -80,7 +80,7 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 8
-TRAINING_CYCLES = 1
+TRAINING_CYCLES = 5
 EPOCHS = 10
 INPUT_SIZE = 128
 BATCH_SIZE = 64
@@ -90,7 +90,6 @@ inDir = './'
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures/simple', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures/detailed', exist_ok=True)
-# os.makedirs(inDir + 'kaggle/msk', exist_ok=True)
 os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
 os.makedirs(inDir + 'kaggle/logs', exist_ok=True)
 
