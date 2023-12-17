@@ -82,7 +82,7 @@ ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 17
 TRAINING_CYCLES = 5
-EPOCHS = 10
+EPOCHS = 1
 INPUT_SIZE = 128
 BATCH_SIZE = 64
 INITIAL_LEARNING_RATE = 0.001
@@ -349,7 +349,7 @@ def get_patch_samples(input_patch, output_patch):
     return random.sample(patch_variants, sample_rate)
 
 # data op
-def get_patches(inputs, outputs, amount):
+def generate_patches(inputs, outputs, amount):
     input_patches, output_patches = [], []
 
     while len(input_patches) < amount:
@@ -384,10 +384,10 @@ def get_patches(inputs, outputs, amount):
     return input_patches, output_patches
 
 # neural op
-def evaluate_jacc(model, img, msk):
+def evaluate_jacc(model):
     print("evaluate predictions by calculating jaccard score")
     # get some new patches to calculate the jaccard score on new data
-    x_val, y_val = get_patches(img, msk, BATCH_SIZE * 30)
+    x_val, y_val = get_patches(BATCH_SIZE * 30)
     y_pred = model.predict(x_val, batch_size=4)
 
     print ("prediction shape: ", y_pred.shape, " expected shape: ", y_val.shape)
@@ -476,26 +476,34 @@ def get_unet():
     )
 
     # compile the model
-    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["categorical_accuracy", jaccard_coef_int, dice_coef_multilabel])
+    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["accuracy", jaccard_coef_int, dice_coef_multilabel])
 
     return model
+
+def get_patches(amount):
+    inputs = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
+    outputs = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
+    x_trn, y_trn = generate_patches(inputs, outputs, amount)
+
+    del(inputs, outputs)
+    gc.collect()
+
+    return (x_trn, y_trn)
 
 # neural op
 def train_net(reuse_prev=False):
     print ("train net")
-    inputs = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
-    outputs = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
-
     model = get_unet()
 
     # for visualization
     model.save("keras_model.h5")
 
+    # for reusing previous weights
     if reuse_prev:
         model.load_weights(inDir +'/kaggle/weights_best/unet_%d' % CLASSES)
 
     for i in range(TRAINING_CYCLES):
-        x_trn, y_trn = get_patches(inputs, outputs, BATCH_SIZE * 30)
+        x_trn, y_trn = get_patches(BATCH_SIZE * 30)
         # create tensorboard for monitoring
         tensorboard = TensorBoard(log_dir=logsDir,update_freq='batch')
         # fit the model to the data
@@ -504,7 +512,7 @@ def train_net(reuse_prev=False):
         del(x_trn, y_trn)
         gc.collect()
 
-        evaluate_jacc(model, inputs, outputs)
+        evaluate_jacc(model)
 
     model.save_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
 
