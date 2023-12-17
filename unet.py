@@ -81,7 +81,7 @@ ORIGINAL_INDEX_MAP = {
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 11
-TRAINING_CYCLES = 1
+TRAINING_CYCLES = 3
 EPOCHS = 10
 INPUT_SIZE = 128
 BATCH_SIZE = 64
@@ -299,6 +299,9 @@ def dice_coef_multilabel(y_true, y_pred):
 def dice_loss(y_true, y_pred):
     return -dice_coef_multilabel(y_true, y_pred)
 
+def combined_loss(y_true, y_pred):
+    return 0.5 * dice_loss(y_true, y_pred) + 0.5 * jaccard_loss(y_true, y_pred)
+
 # neural op
 def prepare_training_data():
     print("preparing training data")
@@ -500,7 +503,7 @@ def get_unet():
     )
 
     # compile the model
-    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=jaccard_loss, metrics=["accuracy", jaccard_coef_int, dice_coef_multilabel])
+    model.compile(optimizer=legacy.Adam(learning_rate=learning_rate_scheduler), loss=combined_loss, metrics=["accuracy", jaccard_coef_int, dice_coef_multilabel])
 
     return model
 
