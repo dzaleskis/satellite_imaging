@@ -53,13 +53,13 @@ CLASS_SAMPLE_RATE = {
 }
 
 CLASS_COLORS = {
-    "Buildings": [0xA9, 0xA9, 0xA9, 0],
-    "Misc Manmade structures": [0xA8, 0xD1, 0xD1, 0],
-    "Road": [0x4B, 0x4B, 0x50, 0],
-    "Track":[0x96, 0x4B, 0x00, 0],
-    "Trees": [0xBB, 0xDD, 0x2D, 0],
-    "Crops":[0xEB, 0xCC, 0x95, 0],
-    "Water": [0x24, 0x88, 0xD5, 0],
+    "Buildings": [0xAA, 0xAA, 0xAA, 0],
+    "Misc Manmade structures": [0x66, 0x66, 0x66, 0],
+    "Road": [0xB3, 0x58, 0x06, 0],
+    "Track":[0xDF, 0xC2, 0x7D, 0],
+    "Trees": [0x1B, 0x78, 0x37, 0],
+    "Crops":[0xA6, 0xDB, 0xA0, 0],
+    "Water": [0x74, 0xAD, 0xD1, 0],
     "Background": [0xFF, 0xFF, 0xFF, 0]
 }
 
@@ -615,7 +615,7 @@ def full_mask(img, mask):
             distr = mask[x][y]
             argmax = np.argmax(distr)
             result[x][y] = CLASS_COLORS[CLASS_LIST[argmax]]
-            result[x][y][3] = 255 * distr[argmax]
+            result[x][y][3] = 255 * distr[argmax] * 0.5
     
     return result
 
@@ -703,9 +703,9 @@ def check_all():
         check_predict_simple(id)
 
 if __name__ == "__main__":
-    prepare_training_data()
+    # prepare_training_data()
 
-    train_net()
+    # train_net()
 
     check_single('6120_2_2')
 
