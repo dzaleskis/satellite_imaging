@@ -78,6 +78,25 @@ ORIGINAL_INDEX_MAP = {
     9: -1
 }
 
+CLASS_LIST = [
+    "Buildings", "Misc Manmade structures",
+    "Road", "Track",
+    "Trees", "Crops",
+    "Water",
+    "Background"
+]
+
+# mapping from class index to z index (which class should come out on top)
+Z_INDEX_MAP = {
+    0: 1,
+    1: 1,
+    2: 0,
+    3: 0,
+    4: 2,
+    5: 1,
+    6: 0,
+}
+
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
 CHANNELS = 11
@@ -339,6 +358,17 @@ def prepare_training_data():
             
             output[i, :, :, z] += generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:dim, :dim]
 
+    for i in range(output.shape[0]):
+        for x in range(output.shape[1]):
+            for y in range(output.shape[2]):
+                distr = output[i][x][y]
+                conflicts = np.flatnonzero(distr == 1)
+
+                if len(conflicts) > 1:
+                    sorted_conflicts = sorted(conflicts, key = lambda x: Z_INDEX_MAP[x])
+                    np.put(distr, sorted_conflicts[:-1], 0)
+
+
     # handle background after everything else
     exists_mask = np.sum(output, axis=3)
     background_mask = (exists_mask == 0).astype(np.float32)
@@ -568,6 +598,15 @@ def true_mask_for_img(img, id):
 
         true_class_msk[:, :, z] += generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
 
+    for x in range(true_class_msk.shape[0]):
+        for y in range(true_class_msk.shape[1]):
+            distr = true_class_msk[x][y]
+            conflicts = np.flatnonzero(distr == 1)
+
+            if len(conflicts) > 1:
+                sorted_conflicts = sorted(conflicts, key = lambda x: Z_INDEX_MAP[x])
+                np.put(distr, sorted_conflicts[:-1], 0)
+
     exists_mask = np.sum(true_class_msk, axis=2)
     background_mask = (exists_mask == 0).astype(np.float32)
     background_mask = np.reshape(background_mask, (background_mask.shape[0], background_mask.shape[1], 1))
@@ -707,6 +746,7 @@ if __name__ == "__main__":
 
     train_net()
 
+    check_single('6120_2_2')
     check_single('6070_2_3')
 
     # check_all()
