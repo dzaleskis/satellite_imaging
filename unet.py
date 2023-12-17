@@ -80,9 +80,9 @@ ORIGINAL_INDEX_MAP = {
 
 ORIGINAL_CLASSES = len(ORIGINAL_CLASS_LIST)
 CLASSES = len(CLASS_LIST)
-CHANNELS = 17
+CHANNELS = 11
 TRAINING_CYCLES = 5
-EPOCHS = 1
+EPOCHS = 10
 INPUT_SIZE = 128
 BATCH_SIZE = 64
 INITIAL_LEARNING_RATE = 0.001
@@ -185,6 +185,27 @@ def mask_for_polygons(polygons, im_size):
 
     return img_mask
 
+def CCCI_index(m):
+    R = m[:,:,4]
+    RE  = m[:,:,5] 
+    NIR = m[:,:,7]
+    # canopy chloropyll content index
+    CCCI = (NIR-RE)/(NIR+RE)*(NIR-R)/(NIR+R)
+
+    return CCCI
+
+def EVI_index(m):
+    R = m[:,:,4]
+    B = m[:,:,1]
+    NIR = m[:,:,7]
+    L = 1
+    C1 = 6
+    C2 = 7.5
+    G = 2.5
+    EVI = G * (NIR - R) / ((NIR + C1) * (R - C2) * (B + L))
+
+    return EVI
+
 # data op
 def multispectral(image_id):
     filename = os.path.join(inDir, 'sixteen_band', '{}_M.tif'.format(image_id))
@@ -209,17 +230,20 @@ def panchromatic(image_id):
 def get_channels(image_id):
     # get multispectral channels
     m = multispectral(image_id)
-    # get infrared channels
-    i = infrared(image_id)
-    # resize infrared channels to match multispectral
-    i = cv2.resize(i, (m.shape[1], m.shape[0]))
     # get panchromatic channels
     p = panchromatic(image_id)
     # resize panchromatic channels to match multispectral
     p = cv2.resize(p, (m.shape[1], m.shape[0]))
     p = np.reshape(p, (p.shape[0], p.shape[1], 1))
+    # get CCI channel
+    ccci = CCCI_index(m)
+    ccci = np.reshape(ccci, (ccci.shape[0], ccci.shape[1], 1))
+    # get EVI channel
+    evi = EVI_index(m)
+    evi = np.reshape(evi, (evi.shape[0], evi.shape[1], 1))
+
     # merge all channels
-    img = np.concatenate((m, i, p), axis=2)
+    img = np.concatenate((m, p, ccci, evi), axis=2)
 
     return img
 
