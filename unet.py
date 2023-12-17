@@ -12,6 +12,7 @@ from keras.layers import Input, Convolution2D, Convolution2DTranspose, MaxPoolin
 from keras.optimizers import legacy, schedules
 from keras.callbacks import TensorBoard
 import gc
+import time
 
 # these are the classes defined in the data file
 ORIGINAL_CLASS_LIST = [
@@ -84,14 +85,16 @@ TRAINING_CYCLES = 5
 EPOCHS = 10
 INPUT_SIZE = 128
 BATCH_SIZE = 64
+INITIAL_LEARNING_RATE = 0.001
 EPSILON = 1e-12
 
 inDir = './'
+logsDir = inDir + 'kaggle/logs' + str(time.time())
 os.makedirs(inDir + 'kaggle/data', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures/simple', exist_ok=True)
 os.makedirs(inDir + 'kaggle/figures/detailed', exist_ok=True)
 os.makedirs(inDir + 'kaggle/weights', exist_ok=True)
-os.makedirs(inDir + 'kaggle/logs', exist_ok=True)
+os.makedirs(inDir + logsDir, exist_ok=True)
 
 # data op
 def _convert_coordinates_to_raster(coords, img_size, xymax):
@@ -432,7 +435,7 @@ def downsample_block(x, n_filters):
 
 def upsample_block(x, conv_features, n_filters):
     # upsample
-    x = Convolution2DTranspose(n_filters, 3, 2, padding="same")(x)
+    x = Convolution2DTranspose(n_filters, 2, 2, padding="same")(x)
     x = concatenate([x, conv_features])
     x = Dropout(0.3)(x)
     # Conv2D twice with ReLU activation
@@ -466,9 +469,9 @@ def get_unet():
 
     # create a learning rate scheduler
     learning_rate_scheduler = schedules.ExponentialDecay(
-        initial_learning_rate=0.001,
+        initial_learning_rate=INITIAL_LEARNING_RATE,
         decay_steps=150,
-        decay_rate=0.90,
+        decay_rate=0.96,
         staircase=False
     )
 
@@ -478,7 +481,7 @@ def get_unet():
     return model
 
 # neural op
-def train_net():
+def train_net(reuse_prev=False):
     print ("train net")
     inputs = np.load(inDir + '/kaggle/data/input_training_%d.npy' % CLASSES)
     outputs = np.load(inDir + '/kaggle/data/output_training_%d.npy' % CLASSES)
@@ -488,12 +491,13 @@ def train_net():
     # for visualization
     model.save("keras_model.h5")
 
-    # model.load_weights(inDir +'/kaggle/weights/unet_%d' % CLASSES)
+    if reuse_prev:
+        model.load_weights(inDir +'/kaggle/weights_best/unet_%d' % CLASSES)
 
     for i in range(TRAINING_CYCLES):
         x_trn, y_trn = get_patches(inputs, outputs, BATCH_SIZE * 30)
         # create tensorboard for monitoring
-        tensorboard = TensorBoard(log_dir=inDir+'kaggle/logs',update_freq='batch')
+        tensorboard = TensorBoard(log_dir=logsDir,update_freq='batch')
         # fit the model to the data
         model.fit(x_trn, y_trn, batch_size=BATCH_SIZE, epochs=EPOCHS, verbose=1, shuffle=True, callbacks=[tensorboard])
         
