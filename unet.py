@@ -337,7 +337,7 @@ def prepare_training_data():
             if z == -1:
                 continue 
             
-            output[i, :, :, z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:dim, :dim]
+            output[i, :, :, z] += generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)[:dim, :dim]
 
     # handle background after everything else
     exists_mask = np.sum(output, axis=3)
@@ -566,7 +566,7 @@ def true_mask_for_img(img, id):
         if z == -1:
             continue
 
-        true_class_msk[:, :, z] = generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
+        true_class_msk[:, :, z] += generate_mask_for_image_and_class((img.shape[0], img.shape[1]), id, z_org + 1, gridSizes, dataFrame)
 
     exists_mask = np.sum(true_class_msk, axis=2)
     background_mask = (exists_mask == 0).astype(np.float32)
@@ -703,10 +703,10 @@ def check_all():
         check_predict_simple(id)
 
 if __name__ == "__main__":
-    # prepare_training_data()
+    prepare_training_data()
 
-    # train_net()
+    train_net()
 
-    check_single('6120_2_2')
+    check_single('6070_2_3')
 
     # check_all()
